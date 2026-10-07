@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>돌려 보는 라이다 — 12만 점을 바닥과 물체로</title>
+<meta name="description" content="자율주행차의 레이저 스캐너가 0.1초마다 찍는 12만 점을 손으로 돌려 봅니다. 점을 바닥과 물체로 나누는 C++ 코드가 이 브라우저 안에서 돕니다.">
+<style>
+  :root {
+    --bg: #0b0f14; --panel: #131a22; --line: #243140; --text: #e8eef5; --dim: #8b9bb0;
+    --ok: #2fbf71; --ng: #ff3b4e; --accent: #5bc0ff; --warn: #f08a3c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
+  body { padding: 16px 16px 40px; }
+  main { max-width: 1040px; margin: 0 auto; }
+  header h1 { text-wrap: balance; font-size: clamp(22px, 4.6vw, 34px); margin: 4px 0 6px; letter-spacing: -0.02em; }
+  header p { margin: 0 0 14px; color: var(--dim); font-size: 15px; line-height: 1.55; }
+  header b { color: var(--text); }
+
+  .scene { margin: 0 0 14px; }
+  .scene h2 { font-size: 13px; color: var(--dim); font-weight: 600; margin: 0 0 8px; letter-spacing: .02em; }
+  .scene ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .scene li { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .scene svg { display: block; width: 100%; height: auto; background: #0e141b; }
+  .scene span { display: block; padding: 7px 9px 9px; font-size: 12.5px; line-height: 1.45; color: var(--dim); }
+  .scene span b { color: var(--text); }
+  .scene .sweep { transform-origin: 100px 62px; animation: sweep 3s linear infinite; }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .scene .sweep { animation: none; } }
+  @media (max-width: 560px) { .scene span { font-size: 11.5px; padding: 6px 7px 8px; } .scene span b { display: block; } }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 14px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .grid > * { min-width: 0; }
+
+  .stage { position: relative; background: #05080b; border-radius: 14px; overflow: hidden; border: 3px solid var(--line); }
+  .stage canvas { display: block; width: 100%; height: min(52vh, 520px); min-height: 280px; touch-action: pan-y; cursor: grab; }
+  .stage canvas:active { cursor: grabbing; }
+  .tag { position: absolute; top: 10px; left: 10px; background: rgba(11, 15, 20, .78); border: 1px solid var(--line);
+    padding: 4px 9px; border-radius: 999px; font-size: 12px; color: var(--dim); pointer-events: none; }
+  .hint { position: absolute; top: 10px; right: 10px; background: rgba(11, 15, 20, .78); border: 1px solid var(--line);
+    padding: 4px 9px; border-radius: 999px; font-size: 12px; color: var(--accent); pointer-events: none; transition: opacity .4s; }
+  .banner { padding: 10px 14px 12px; background: #05080b; border-top: 1px solid var(--line); min-height: 84px; }
+  .banner .v { font-weight: 800; font-size: clamp(19px, 4.2vw, 26px); color: var(--accent); font-variant-numeric: tabular-nums; }
+  .banner .w { color: var(--text); font-size: 14px; margin-top: 2px; line-height: 1.45; }
+
+  .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+  button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  button[aria-pressed="true"] { background: rgba(91, 192, 255, .14); border-color: var(--accent); color: #fff; font-weight: 700; }
+  button.primary { background: var(--accent); color: #04121c; border-color: var(--accent); font-weight: 700; }
+  .chips button { padding: 10px 4px; font-size: 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 10px 11px; font-variant-numeric: tabular-nums; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  input[type=range] { flex: 1 1 120px; accent-color: var(--accent); min-width: 0; }
+  .note { color: var(--dim); font-size: 12.5px; margin: 8px 2px 0; line-height: 1.5; min-height: 19px; }
+  .note b { color: var(--warn); }
+  .error { color: var(--warn); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .panel + .panel { margin-top: 14px; }
+  .panel h2 { font-size: 13px; color: var(--dim); font-weight: 600; margin: 0 0 10px; letter-spacing: .02em; display: flex; justify-content: space-between; gap: 8px; }
+  .big { font-size: clamp(28px, 6vw, 40px); font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .big small { font-size: 14px; font-weight: 600; color: var(--dim); margin-left: 6px; }
+  .row { display: grid; grid-template-columns: 92px 1fr 62px; gap: 8px; align-items: center; font-size: 13px; margin-top: 7px; }
+  .row span:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); }
+  .bar { height: 10px; background: #0b1016; border-radius: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+  .bar i.rec { background: #5d6f84; }
+  .small { font-size: 12px; color: var(--dim); margin: 10px 0 0; line-height: 1.55; }
+  .small b { color: var(--text); }
+  details { margin-top: 14px; color: var(--dim); font-size: 13.5px; line-height: 1.6; }
+  details summary { cursor: pointer; color: var(--text); }
+  details table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  details td, details th { border: 1px solid var(--line); padding: 4px 9px; text-align: right; }
+  details th:first-child, details td:first-child { text-align: left; }
+  a { color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>돌려 보는 라이다</h1>
+    <p>자율주행차 지붕의 레이저 스캐너가 0.1초마다 찍는 <b>12만 개의 점</b>입니다. 손으로 돌려 보세요.
+      이 점들을 <b>바닥과 물체로 나누는 C++ 코드</b>가 지금 이 브라우저 안에서 돌고 있습니다. 서버는 없습니다.</p>
+  </header>
+
+  <section class="scene" aria-label="쓰는 장면">
+    <h2>차가 주변을 알아보는 첫 단계 — 카메라 영상이 아니라 거리를 잰 점에서 시작합니다</h2>
+    <ol>
+      <li>
+        <svg viewBox="0 0 200 124" role="img" aria-label="차 지붕의 센서가 한 바퀴 돌며 주변에 점을 찍는다">
+          <g fill="none" stroke="#2f4a66" stroke-width="1.5" stroke-dasharray="1.5 5" stroke-linecap="round">
+            <circle cx="100" cy="62" r="22"/><circle cx="100" cy="62" r="36"/><circle cx="100" cy="62" r="50"/>
+          </g>
+          <path class="sweep" d="M100 62 L156 62" stroke="#5bc0ff" stroke-width="2" stroke-linecap="round"/>
+          <rect x="86" y="54" width="28" height="16" rx="4" fill="#e8eef5"/><circle cx="100" cy="62" r="4" fill="#5bc0ff"/>
+        </svg>
+        <span><b>① 찍기</b> 한 바퀴에 점 12만 개</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 200 124" role="img" aria-label="점 가운데 바닥에 해당하는 것을 찾아 뺀다">
+          <g fill="#34609a"><circle cx="30" cy="96" r="2.5"/><circle cx="48" cy="100" r="2.5"/><circle cx="66" cy="95" r="2.5"/><circle cx="84" cy="101" r="2.5"/><circle cx="104" cy="96" r="2.5"/><circle cx="124" cy="100" r="2.5"/><circle cx="144" cy="95" r="2.5"/><circle cx="164" cy="100" r="2.5"/><circle cx="178" cy="96" r="2.5"/></g>
+          <path d="M18 98 H186" stroke="#5bc0ff" stroke-width="1.5" stroke-dasharray="6 4"/>
+          <g fill="#ffb454"><circle cx="50" cy="70" r="2.5"/><circle cx="56" cy="58" r="2.5"/><circle cx="50" cy="46" r="2.5"/><circle cx="62" cy="76" r="2.5"/><circle cx="62" cy="46" r="2.5"/>
+            <circle cx="134" cy="78" r="2.5"/><circle cx="146" cy="72" r="2.5"/><circle cx="158" cy="78" r="2.5"/><circle cx="146" cy="84" r="2.5"/></g>
+        </svg>
+        <span><b>② 바닥 빼기</b> 가장 넓은 평면 찾기</span>
+      </li>
+      <li>
+        <svg viewBox="0 0 200 124" role="img" aria-label="남은 점을 붙어 있는 것끼리 묶어 물체로 나눈다">
+          <g fill="#7ee787"><circle cx="50" cy="70" r="2.5"/><circle cx="56" cy="58" r="2.5"/><circle cx="50" cy="46" r="2.5"/><circle cx="62" cy="76" r="2.5"/><circle cx="62" cy="46" r="2.5"/></g>
+          <rect x="40" y="38" width="32" height="46" rx="5" fill="none" stroke="#7ee787" stroke-width="1.5"/>
+          <g fill="#ff6b6b"><circle cx="134" cy="78" r="2.5"/><circle cx="146" cy="72" r="2.5"/><circle cx="158" cy="78" r="2.5"/><circle cx="146" cy="84" r="2.5"/></g>
+          <rect x="125" y="64" width="42" height="28" rx="5" fill="none" stroke="#ff6b6b" stroke-width="1.5"/>
+          <g fill="#1e2c3e"><circle cx="30" cy="104" r="2.5"/><circle cx="66" cy="106" r="2.5"/><circle cx="104" cy="104" r="2.5"/><circle cx="144" cy="106" r="2.5"/><circle cx="178" cy="104" r="2.5"/></g>
+        </svg>
+        <span><b>③ 묶기</b> 붙어 있는 점끼리 한 물체</span>
+      </li>
+    </ol>
+  </section>
+
+  <div class="grid">
+    <section>
+      <div class="stage">
+        <canvas id="view" aria-label="점구름. 끌어서 돌립니다."></canvas>
+        <div class="tag" id="tag">불러오는 중</div>
+        <div class="hint" id="hint">끌어서 돌리기</div>
+        <div class="banner"><div class="v" id="title">준비 중</div><div class="w" id="text"></div></div>
+      </div>
+
+      <div class="chips" id="chips">
+        <button data-stage="raw">① 원본 점</button>
+        <button data-stage="voxel">② 복셀</button>
+        <button data-stage="ground">③ 바닥</button>
+        <button data-stage="object">④ 물체</button>
+      </div>
+      <div class="actions">
+        <button id="btnPlay" class="primary">멈춤</button>
+        <input type="range" id="frame" min="0" max="11" value="0" aria-label="장면">
+        <button id="btnTop">위에서</button>
+        <button id="btnSide">비스듬히</button>
+        <button id="btnNear">가까이</button>
+      </div>
+      <div class="actions">
+        <button id="btnReseed">같은 장면, 바닥 다시 찾기</button>
+        <span class="seg" id="iters" aria-label="평면을 세워 보는 횟수">
+          <button data-iters="256">256번</button><button data-iters="1024">1,024번</button><button data-iters="4096">4,096번</button>
+        </span>
+      </div>
+      <p class="note" id="note"></p>
+    </section>
+
+    <aside>
+      <div class="panel">
+        <h2><span>이 기기에서 방금 걸린 시간</span><span id="engine">WASM</span></h2>
+        <div class="big"><span id="total">—</span><small id="budget"></small></div>
+        <div class="row"><span>복셀로 줄이기</span><div class="bar"><i id="bVoxel"></i></div><span id="tVoxel">—</span></div>
+        <div class="row"><span>바닥 찾기</span><div class="bar"><i id="bRansac"></i></div><span id="tRansac">—</span></div>
+        <div class="row"><span>물체로 묶기</span><div class="bar"><i id="bCluster"></i></div><span id="tCluster">—</span></div>
+        <p class="small">점 12만 개 한 장을 처리한 시간입니다(최근 12번의 가운데 값). 그리는 시간은 넣지 않았습니다.</p>
+      </div>
+      <div class="panel">
+        <h2><span>같은 코드를 다른 곳에서 돌리면</span><span>기록</span></h2>
+        <div class="row"><span>이 브라우저</span><div class="bar"><i id="cWasm"></i></div><span id="vWasm">—</span></div>
+        <div class="row"><span>PC, 한 코어</span><div class="bar"><i class="rec" id="cCpu1"></i></div><span>5.55ms</span></div>
+        <div class="row"><span>PC, 8코어</span><div class="bar"><i class="rec" id="cCpu8"></i></div><span>1.55ms</span></div>
+        <div class="row"><span>GPU로 옮김</span><div class="bar"><i class="rec" id="cGpu"></i></div><span>0.70ms</span></div>
+        <p class="small">회색 세 줄은 개발 PC(Ryzen 7 7800X3D · RTX 4080 SUPER)에서 잰 <b>기록</b>이고, 파란 줄만 지금 재는 값입니다(모두 평면 256번 기준).
+          GPU판은 CUDA 커널을 직접 써서 옮긴 것이고, 9가지 구현이 <b>같은 답</b>을 내는지부터 확인했습니다. 이 화면의 WASM도 그중 하나입니다.</p>
+      </div>
+    </aside>
+  </div>
+
+  <details>
+    <summary>되는 것과 안 되는 것 (재 본 값)</summary>
+    <p><b style="color:var(--text)">같은 답인가.</b> 이 화면은 PC용과 같은 C++ 소스를 WebAssembly로 낸 것입니다. 12장 전부에서 복셀 3만 개의 위치(소수 비트까지), 고른 바닥 평면, 바닥 칸 수,
+      물체 라벨 4만 칸이 PC에서 돌린 결과와 같았습니다. 주소 끝에 <a href="?selftest=1">?selftest=1</a>을 붙이면 이 기기에서 다시 대조합니다.</p>
+    <p><b style="color:var(--text)">물체 수는 믿을 만한가.</b> 아닙니다. 바닥은 무작위로 세운 평면 가운데 고르는데, 같은 장면에서 그 무작위만 50번 바꿔 보니 물체 수가 이만큼 흔들렸습니다(12장의 가운데 값).
+      위의 「같은 장면, 바닥 다시 찾기」로 직접 볼 수 있습니다.</p>
+    <table>
+      <tr><th>평면을 세워 보는 횟수</th><th>256번</th><th>1,024번</th><th>4,096번</th></tr>
+      <tr><td>물체 수가 흔들린 폭(최대 − 최소)</td><td>51덩이</td><td>40덩이</td><td>28덩이</td></tr>
+      <tr><td>바닥 칸 수가 흔들린 폭</td><td>827칸</td><td>310칸</td><td>120칸</td></tr>
+    </table>
+    <p>횟수를 16배로 늘리면 바닥은 잡히지만 물체 수는 여전히 28덩이씩 다릅니다. 평면 하나로는 경사·연석을 다 덮지 못해 바닥 조각이 물체로 남기 때문입니다.
+      이 코드가 잰 것은 처리 속도와 구현 간 일치이고, 물체를 맞게 찾는지는 재지 않았습니다. 사람·차 같은 종류도 구분하지 않습니다.</p>
+    <p>데이터: KITTI raw 2011_09_26_drive_0001(Velodyne HDL-64E), 0.9초 간격 12장, CC BY-NC-SA 3.0. 차 주변 80m×80m 안의 점만 1.2mm 단위로 줄여 실었습니다(한 장 0.7MB).
+      코드: <a href="https://github.com/MJHolics/lidar-edge-accel">github.com/MJHolics/lidar-edge-accel</a></p>
+  </details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
